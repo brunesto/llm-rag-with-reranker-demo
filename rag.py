@@ -20,6 +20,36 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sentence_transformers import CrossEncoder
 from streamlit.runtime.uploaded_file_manager import UploadedFile
 
+
+from chromadb import Documents, EmbeddingFunction, Embeddings
+  
+import torch
+from transformers import AutoModel, AutoTokenizer
+
+
+class SeznamEmbeddings(EmbeddingFunction):
+
+  def __init__(self,model_name:str):    
+    self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+    self.model = AutoModel.from_pretrained(model_name)
+
+  def __call__(self, input: Documents) -> Embeddings:
+        print(input[0])
+        print("===============================================")
+        # texts=list(map(lambda d:d.text,input))
+        
+        # embed the documents somehow
+        return self.embeddings(input)
+
+  def embeddings(self,texts):
+     # Tokenize the input texts
+     batch_dict = self.tokenizer(texts, max_length=128, padding=True, truncation=True, return_tensors='pt')
+
+     outputs =self.model(**batch_dict)
+     embeddings = outputs.last_hidden_state[:, 0] # CLS
+     return embeddings.detach().numpy()
+
+
 class Rag:
     # https://www.sbert.net/docs/cross_encoder/pretrained_models.html
     cross_encoder="cross-encoder/ms-marco-MiniLM-L-6-v2"
@@ -32,27 +62,31 @@ class Rag:
 
 
     original_system_prompt = """
-    You are an AI assistant tasked with providing detailed answers based solely on the given context. Your goal is to analyze the information provided and formulate a comprehensive, well-structured response to the question.
+Use the following pieces of context to answer the user's question. If you don't know the answer, just say that you don't know, don't try to make up an answer. Context:
+{context}       
+        """
+#     """
+# You are an AI assistant tasked with providing detailed answers based solely on the given context. Your goal is to analyze the information provided and formulate a comprehensive, well-structured response to the question.
 
-    context will be passed as "Context:"
-    user question will be passed as "Question:"
+# context will be passed as "Context:"
+# user question will be passed as "Question:"
 
-    To answer the question:
-    1. Thoroughly analyze the context, identifying key information relevant to the question.
-    2. Organize your thoughts and plan your response to ensure a logical flow of information.
-    3. Formulate a detailed answer that directly addresses the question, using only the information provided in the context.
-    4. Ensure your answer is comprehensive, covering all relevant aspects found in the context.
-    5. If the context doesn't contain sufficient information to fully answer the question, state this clearly in your response.
+# To answer the question:
+# 1. Thoroughly analyze the context, identifying key information relevant to the question.
+# 2. Organize your thoughts and plan your response to ensure a logical flow of information.
+# 3. Formulate a detailed answer that directly addresses the question, using only the information provided in the context.
+# 4. Ensure your answer is comprehensive, covering all relevant aspects found in the context.
+# 5. If the context doesn't contain sufficient information to fully answer the question, state this clearly in your response.
 
-    Format your response as follows:
-    1. Use clear, concise language.
-    2. Organize your answer into paragraphs for readability.
-    3. Use bullet points or numbered lists where appropriate to break down complex information.
-    4. If relevant, include any headings or subheadings to structure your response.
-    5. Ensure proper grammar, punctuation, and spelling throughout your answer.
+# Format your response as follows:
+# 1. Use clear, concise language.
+# 2. Organize your answer into paragraphs for readability.
+# 3. Use bullet points or numbered lists where appropriate to break down complex information.
+# 4. If relevant, include any headings or subheadings to structure your response.
+# 5. Ensure proper grammar, punctuation, and spelling throughout your answer.
 
-    Important: Base your entire response solely on the information provided in the context. Do not include any external knowledge or assumptions not present in the given text.
-    """
+# Important: Base your entire response solely on the information provided in the context. Do not include any external knowledge or assumptions not present in the given text.
+# """
 
 
     def process_document(self,uploaded_file: UploadedFile) -> list[Document]:
@@ -88,6 +122,7 @@ class Rag:
         return text_splitter.split_documents(docs)
 
 
+
     def get_vector_collection(self) -> chromadb.Collection:
         """Gets or creates a ChromaDB collection for vector storage.
 
@@ -103,15 +138,23 @@ class Rag:
             url="http://localhost:11434/api/embeddings",
             model_name=self.embedding
         )
-        print("using distance function:",self.embedding_distance_function)
 
+        seznam=SeznamEmbeddings("Seznam/retromae-small-cs")
+
+        embedding_function=seznam
+       
         chroma_client = chromadb.PersistentClient(path="./"+self.chromadbpath+"-chroma")
         return chroma_client.get_or_create_collection(
             name="rag_app",
-            embedding_function=ollama_ef,
+            embedding_function=embedding_function,
             metadata={"hnsw:space": self.embedding_distance_function},
         )
 
+
+    def db_chunks_size(self):
+        """ return the number of chunks found in the db """
+        ids_only_result = self.get_vector_collection().get(include=[])
+        return len(ids_only_result['ids'])
 
     def add_to_vector_collection(self,all_splits: list[Document], file_name: str):
         """Adds document splits to a vector collection for semantic search.
@@ -185,11 +228,11 @@ class Rag:
             messages=[
                 {
                     "role": "system",
-                    "content": system_prompt,
+                    "content": system_prompt.replace("{context}",context),
                 },
                 {
                     "role": "user",
-                    "content": f"Context: {context}, Question: {prompt}",
+                    "content": f"question: {prompt}",
                 },
             ],
         )

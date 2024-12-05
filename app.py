@@ -20,6 +20,8 @@ with st.sidebar:
    
 
     rag.chromadbpath = st.text_input("db (this let you experiment with loading different documents):","demo-rag")
+    
+    st.write("chunks: ",rag.db_chunks_size())
 
     rag.embedding = st.selectbox(
     "embedding (https://ollama.com/search?c=embedding)",
@@ -48,11 +50,13 @@ with st.sidebar:
 
 
 
-rag.model=st.selectbox(
-    "LLM model (https://ollama.com/search)",(
-    "llama3.2:3b",
-    "qwen2"
-    ))
+
+prompt = st.text_area("prompt:")
+ask = st.button(
+    "🔥 Ask",
+)
+
+
 
 rag.cross_encoder = st.selectbox(
     """cross encoder is used to rerank documents before feeding to LLM  (https://www.sbert.net/docs/cross_encoder/pretrained_models.html)""",
@@ -97,21 +101,31 @@ rag.cross_encoder = st.selectbox(
 
 system_prompt = st.text_area("system prompt:",value=rag.original_system_prompt)
 
-prompt = st.text_area("prompt:")
-ask = st.button(
-    "🔥 Ask",
-)
+
+
+rag.model=st.selectbox(
+    "LLM model (https://ollama.com/search)",(
+    "llama3.2:3b",
+    "qwen2"
+    ))
+
+st.divider()
 
 if ask and prompt:
     results = rag.query_collection(prompt)
+    
+    with st.expander("See retrieved documents based on embeddings"):
+        st.write(results)
+
     context = results.get("documents")[0]
     relevant_text, relevant_text_ids = rag.re_rank_cross_encoders(prompt,context)
+
+    with st.expander("Most relevant documents (reranking)"):
+        st.write(relevant_text_ids)
+        st.write(relevant_text)
+
+    st.write("Response:")
     response = rag.call_llm(context=relevant_text, prompt=prompt,system_prompt=system_prompt)
     st.write_stream(response)
 
-    with st.expander("See retrieved documents"):
-        st.write(results)
-
-    with st.expander("See most relevant document ids"):
-        st.write(relevant_text_ids)
-        st.write(relevant_text)
+    

@@ -30,11 +30,7 @@ with st.sidebar:
     ))
 
 
-    rag.embedding_distance_function = st.selectbox(
-    "embeddings distance function (https://docs.trychroma.com/guides#changing-the-distance-function)",
-    ("cosine", "l2", "ip"),
-    )
-
+   
     uploaded_file = st.file_uploader(
         "Upload PDF ", type=["pdf"], accept_multiple_files=False
     )
@@ -56,6 +52,10 @@ ask = st.button(
     "🔥 Ask",
 )
 
+rag.embedding_distance_function = st.selectbox(
+    "embeddings distance function (https://docs.trychroma.com/guides#changing-the-distance-function)",
+    ("cosine", "l2", "ip"),
+    )
 
 
 rag.cross_encoder = st.selectbox(
@@ -125,7 +125,8 @@ if ask and prompt:
         st.write(relevant_text)
 
     st.write("Response:")
-    response = rag.call_llm(context=relevant_text, prompt=prompt,system_prompt=system_prompt)
+    response = rag.call_llm(rag.format_prompts(context=relevant_text,prompt=prompt,system_prompt=system_prompt))
     st.write_stream(response)
+    
 
     

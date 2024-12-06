@@ -14,9 +14,8 @@ import ollama
 from chromadb.utils.embedding_functions.ollama_embedding_function import (
     OllamaEmbeddingFunction,
 )
-from langchain_community.document_loaders import PyMuPDFLoader
-from langchain_core.documents import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+
 from sentence_transformers import CrossEncoder
 from streamlit.runtime.uploaded_file_manager import UploadedFile
 
@@ -26,6 +25,7 @@ from chromadb import Documents, EmbeddingFunction, Embeddings
 import torch
 from transformers import AutoModel, AutoTokenizer
 
+from docparser import *
 
 class SeznamEmbeddings(EmbeddingFunction):
 
@@ -51,9 +51,17 @@ class SeznamEmbeddings(EmbeddingFunction):
 
 
 class Rag:
+    
+    
+    chromadbpath="demo-rag"
+    docparser=DocParser()
+
     # https://www.sbert.net/docs/cross_encoder/pretrained_models.html
     cross_encoder="cross-encoder/ms-marco-MiniLM-L-6-v2"
-    chromadbpath="demo-rag"
+
+
+    
+    
 
     #https://docs.trychroma.com/guides#changing-the-distance-function
     embedding_distance_function="cosine"
@@ -61,11 +69,21 @@ class Rag:
     model="llama3.2:3b"
 
 
-    original_system_prompt = """
-Use the following pieces of context to answer the user's question. If you don't know the answer, just say that you don't know, don't try to make up an answer. Context:
-{context}       
-        """
+#    original_system_prompt = 
 #     """
+# Use the following pieces of context to answer the user's question. If you don't know the answer, just say that you don't know, don't try to make up an answer. Context:
+# {context}      
+# """
+    
+    # chttps://pdx.www.deepl.com/en/translator
+    #     K zodpovězení otázky uživatele použijte následující souvislosti. Pokud odpověď neznáte, prostě řekněte, že nevíte, nesnažte se odpověď vymyslet. Kontext: 
+    # https://translate.google.com/ 
+    # K odpovědi na otázku uživatele použijte následující části kontextu. Pokud neznáte odpověď, řekněte jen, že nevíte, nesnažte se odpověď vymýšlet. Kontext:
+
+    original_system_prompt = """
+    K odpovědi na otázku uživatele použijte následující části kontextu. Pokud neznáte odpověď, řekněte jen, že nevíte, nesnažte se odpověď vymýšlet. Kontext:
+    {context}
+    """
 # You are an AI assistant tasked with providing detailed answers based solely on the given context. Your goal is to analyze the information provided and formulate a comprehensive, well-structured response to the question.
 
 # context will be passed as "Context:"
@@ -89,39 +107,7 @@ Use the following pieces of context to answer the user's question. If you don't 
 # """
 
 
-    def process_document(self,uploaded_file: UploadedFile) -> list[Document]:
-        """Processes an uploaded PDF file by converting it to text chunks.
-
-        Takes an uploaded PDF file, saves it temporarily, loads and splits the content
-        into text chunks using recursive character splitting.
-
-        Args:
-            uploaded_file: A Streamlit UploadedFile object containing the PDF file
-
-        Returns:
-            A list of Document objects containing the chunked text from the PDF
-
-        Raises:
-            IOError: If there are issues reading/writing the temporary file
-        """
-        # Store uploaded file as a temp file
-        temp_file = tempfile.NamedTemporaryFile("wb", suffix=".pdf", delete=False)
-        temp_file.write(uploaded_file.read())
-
-        loader = PyMuPDFLoader(temp_file.name)
-        docs = loader.load()
-        os.unlink(temp_file.name)  # Delete temp file
-
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=400,
-            chunk_overlap=100,
-            # bruno: just use dots as separator
-            #separators=["\n\n", "\n", ".", "?", "!", " ", ""],
-            separators=["."],
-        )
-        return text_splitter.split_documents(docs)
-
-
+    
 
     def get_vector_collection(self) -> chromadb.Collection:
         """Gets or creates a ChromaDB collection for vector storage.
@@ -134,6 +120,9 @@ Use the following pieces of context to answer the user's question. If you don't 
             chromadb.Collection: A ChromaDB collection configured with the Ollama embedding
                 function and cosine similarity space.
         """
+
+        print("using embedding",self.embedding)
+
         ollama_ef = OllamaEmbeddingFunction(
             url="http://localhost:11434/api/embeddings",
             model_name=self.embedding
@@ -141,7 +130,7 @@ Use the following pieces of context to answer the user's question. If you don't 
 
         seznam=SeznamEmbeddings("Seznam/retromae-small-cs")
 
-        embedding_function=seznam
+        embedding_function=ollama_ef #seznam
        
         chroma_client = chromadb.PersistentClient(path="./"+self.chromadbpath+"-chroma")
         return chroma_client.get_or_create_collection(
@@ -176,8 +165,8 @@ Use the following pieces of context to answer the user's question. If you don't 
         documents, metadatas, ids = [], [], []
 
         for idx, split in enumerate(all_splits):
-            documents.append(split.page_content)
-            metadatas.append(split.metadata)
+            documents.append(split.text)
+            metadatas.append(split.meta)
             ids.append(f"{file_name}_{idx}")
 
         collection.upsert(
@@ -205,8 +194,18 @@ Use the following pieces of context to answer the user's question. If you don't 
         results = collection.query(query_texts=[prompt], n_results=n_results)
         return results
 
-
-    def call_llm(self,context: str, prompt: str,system_prompt:str):
+    def format_prompts(self,context: list[str], prompt: str,system_prompt:str):
+        return [
+                {
+                    "role": "system",
+                    "content": system_prompt.replace("{context}",context),
+                },
+                {
+                    "role": "user",
+                    "content": prompt.replace("{context}",context),
+                },
+            ]
+    def call_llm(self,prompts):
         """Calls the language model with context and prompt to generate a response.
 
         Uses Ollama to stream responses from a language model by providing context and a
@@ -225,16 +224,7 @@ Use the following pieces of context to answer the user's question. If you don't 
         response = ollama.chat(
             model=self.model,
             stream=True,
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_prompt.replace("{context}",context),
-                },
-                {
-                    "role": "user",
-                    "content": f"question: {prompt}",
-                },
-            ],
+            messages=prompts
         )
         for chunk in response:
             if chunk["done"] is False:
@@ -264,14 +254,14 @@ Use the following pieces of context to answer the user's question. If you don't 
         """
         relevant_text = ""
         relevant_text_ids = []
-        if self.cross_encoder != "NONE":
+        if self.cross_encoder != "NONE" and len(documents)>3:
             encoder_model = CrossEncoder(self.cross_encoder)
             ranks = encoder_model.rank(prompt, documents, top_k=3)
             for rank in ranks:
                 relevant_text += documents[rank["corpus_id"]]
                 relevant_text_ids.append(rank["corpus_id"])
         else:
-            for i in range(0,3):
+            for i in range(0,min(3,len(documents))):
                 relevant_text += documents[i]
                 relevant_text_ids.append(i)
                 
@@ -284,13 +274,7 @@ Use the following pieces of context to answer the user's question. If you don't 
         normalizedFileName= uploaded_file.name.translate(
                     str.maketrans({"-": "_", ".": "_", " ": "_"})
                 )
-        all_splits = self.process_document(uploaded_file)
-
-        # for debug: dump the splits as json
-        strs=list(map(lambda x:x.page_content,all_splits))
-        with open(normalizedFileName+"-splits.json", "w") as save_file:  
-            json.dump(strs, save_file, indent = 6)  
-
+        all_splits = self.docparser.process_document(uploaded_file,normalizedFileName)
 
         self.add_to_vector_collection(all_splits, normalizedFileName)
     

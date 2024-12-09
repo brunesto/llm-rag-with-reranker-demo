@@ -1,13 +1,14 @@
 
 # This is just the UI 
-from rag import *
+from dbrag import *
+from chatrag import *
 import streamlit as st
 
 st.set_page_config(page_title="RAG Question Answer")
 
 print("new Rag...")
-rag=Rag()
-
+dbrag=DbRag()
+chatrag=ChatRag()
 
 
 
@@ -19,14 +20,14 @@ st.header("🗣️ RAG Question Answer")
 with st.sidebar:
    
 
-    rag.chromadbpath = st.text_input("db (this let you experiment with loading different documents):","demo-rag")
+    dbrag.chromadbpath = st.text_input("db (this let you experiment with loading different documents):","demo-rag")
     
-    st.write("chunks: ",rag.db_chunks_size())
+    st.write("db stats: ",dbrag.db_stats())
 
-    rag.embedding = st.selectbox(
+    dbrag.config.embedding = st.selectbox(
     "embedding (https://ollama.com/search?c=embedding)",
-    ("nomic-embed-text:latest",
-     "mxbai-embed-large"
+    ("ollama/nomic-embed-text:latest",
+     "ollama/mxbai-embed-large"
     ))
 
 
@@ -39,7 +40,12 @@ with st.sidebar:
         "⚡️ Process",
     )
     if uploaded_file and process:
-        rag.splitAndStore(uploaded_file)
+        # Store uploaded file as a temp file
+        temp_file = tempfile.NamedTemporaryFile("wb", suffix=".pdf", delete=False)
+        temp_file.write(uploaded_file.read())
+        dbrag.splitAndStore(temp_file.name)
+        os.unlink(temp_file)  # Delete temp file
+
         st.success("Data added to the vector store!")
 
 
@@ -52,13 +58,13 @@ ask = st.button(
     "🔥 Ask",
 )
 
-rag.embedding_distance_function = st.selectbox(
+dbrag.config.embedding_distance_function = st.selectbox(
     "embeddings distance function (https://docs.trychroma.com/guides#changing-the-distance-function)",
     ("cosine", "l2", "ip"),
     )
 
 
-rag.cross_encoder = st.selectbox(
+dbrag.config.cross_encoder = st.selectbox(
     """cross encoder is used to rerank documents before feeding to LLM  (https://www.sbert.net/docs/cross_encoder/pretrained_models.html)""",
    ("cross-encoder/ms-marco-MiniLM-L-6-v2",
     "NONE",
@@ -99,11 +105,11 @@ rag.cross_encoder = st.selectbox(
 )
 
 
-system_prompt = st.text_area("system prompt:",value=rag.original_system_prompt)
+system_prompt = st.text_area("system prompt:",value=chatrag.config.original_system_prompt)
 
 
 
-rag.model=st.selectbox(
+chatrag.config.model=st.selectbox(
     "LLM model (https://ollama.com/search)",(
     "llama3.2:3b",
     "qwen2"
@@ -112,20 +118,20 @@ rag.model=st.selectbox(
 st.divider()
 
 if ask and prompt:
-    results = rag.query_collection(prompt)
+    results = dbrag.query_collection(prompt)
     
     with st.expander("See retrieved documents based on embeddings"):
         st.write(results)
 
     context = results.get("documents")[0]
-    relevant_text, relevant_text_ids = rag.re_rank_cross_encoders(prompt,context)
+    relevant_text, relevant_text_ids = dbrag.re_rank_cross_encoders(prompt,context)
 
     with st.expander("Most relevant documents (reranking)"):
         st.write(relevant_text_ids)
         st.write(relevant_text)
 
     st.write("Response:")
-    response = rag.call_llm(rag.format_prompts(context=relevant_text,prompt=prompt,system_prompt=system_prompt))
+    response = chatrag.call_llm(chatrag.format_prompts(context=relevant_text,prompt=prompt,system_prompt=system_prompt))
     st.write_stream(response)
     
 

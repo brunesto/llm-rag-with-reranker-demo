@@ -15,6 +15,12 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 import pymupdf4llm
 from dataclasses import dataclass
 
+# rules=[
+#     (r'^\d+\/70 ',"","remove page number"),
+#     (r'\n *\n',"\n","simplify newlines"),
+#     (r' +'," ","merge spacing"),
+#     (r'\n[ #]*(\d+.)+ ([^\n]*)',"\nodstavec \\2:","make title explicit")
+#     ]
 
 def reformat_text(rules, text):
     """each rule is a triplet: (regexp,replacement,rule name)"""

@@ -88,9 +88,9 @@ def get_embedding_func(config_str):
     else:
         raise "dunno embedding:" + str(config)
 
-    texts = ["Hello, world!", "How are you?"]
-    embeddings = retVal(texts)
-    print(embeddings)
+    # texts = ["Hello, world!", "How are you?"]
+    # embeddings = retVal(texts)
+    # print(embeddings)
     return retVal
 
 
@@ -112,9 +112,9 @@ class DbConfig:
     # the name of DB
     collection_name = "demo-rag"
     # embedding=("ollama/nomic-embed-text:latest")
-    embedding = "seznam/Seznam/retromae-small-cs"
+    embedding = "ollama/nomic-embed-text:latest"
 
-    docparser=("DocParserOld",None)
+    docparser = ("DocParserOld", None)
     # docparser = (
     #     "DocParserNew",
     #     {
@@ -146,13 +146,17 @@ class DbRag:
 
     config = DbConfig()
 
+    def db_basedirname(self):
+        return self.config.base_dir + "/" + self.config.collection_name
+
+    def db_prefix(self):
+        return self.db_basedirname() + "/" + sanitizedName(str(self.config.embedding))
+
     def get_vector_collection(self) -> chromadb.Collection:
 
         # ensure root db dir exists
 
-        os.makedirs(
-            self.config.base_dir + "/" + self.config.collection_name, exist_ok=True
-        )
+        os.makedirs(self.db_basedirname(), exist_ok=True)
 
         # # if there is an existing conf, check that is compatible with self.config
         # conf_filename = self.config.base_dir + self.config.collection_name + ".pickle"
@@ -174,42 +178,72 @@ class DbRag:
 
         embedding_function = get_embedding_func(self.config.embedding)
 
-        chroma_client = chromadb.PersistentClient(
-            path=self.config.base_dir
-            + "/"
-            + self.config.collection_name
-            + "/encoding-"
-            + sanitizedName(str(self.config.embedding))
-        )
-        chroma_client.__getattribute__
+        chroma_client = chromadb.PersistentClient(path=self.db_prefix()+"-chromadb")
+        
         return chroma_client.get_or_create_collection(
             name="rag_app",
             embedding_function=embedding_function,
             metadata={"hnsw:space": self.config.embedding_distance_function},
         )
 
-    def db_stats(self):
+   
+
+    def db_upload_stats_filename(self):
+        return self.db_prefix() + "-uploads.pickle"
+
+    def db_read_upload_stats(self):
+        """return the list of files uploaded to db"""
+        path = self.db_upload_stats_filename()
+        if os.path.isfile(path):
+            with open(path, "rb") as fp:
+                itemlist = pickle.load(fp)
+            return itemlist
+        else:
+            return []
+        
+
+    def db_save_upload_stats(self,stats):
+        path = self.db_upload_stats_filename()
+        with open(path, 'wb') as fp:
+            pickle.dump(stats, fp)
+
+
+    def db_total_chunks(self):
         """return the number of chunks found in the db"""
         ids_only_result = self.get_vector_collection().get(include=["metadatas"])
 
         tuples = set()
         for metadata in ids_only_result["metadatas"]:
             # if metadata == None:
-                tuples.add((None, None))
-            # else:
-            #     tuples.add((metadata["file"], metadata["time"]))
+            tuples.add((None, None))
+        # else:
+        #     tuples.add((metadata["file"], metadata["time"]))
 
         return {"files": tuples, "chunks": len(ids_only_result["ids"])}
 
     # -- adding docs to DB -----------------------
 
-    def splitAndStore(self, filename):
-        normalizedFileName = sanitizedBaseName(filename)
+    def splitAndStore(self, filename,normalizedFileName=None):
+        print("splitAndStore()")
+        stats=self.db_read_upload_stats()
+        if normalizedFileName == None:
+            normalizedFileName = sanitizedBaseName(filename)
+        if normalizedFileName in map(lambda x: x["normalizedFileName"], stats):
+            print("already in db ", normalizedFileName)
+            return False
+        
+        
         docParser = get_doc_parser(self.config.docparser)
         all_splits = docParser.process_document(filename, normalizedFileName)
         self.add_to_vector_collection(all_splits, normalizedFileName)
+        
+
+        stats.append({"normalizedFileName":normalizedFileName,"chunks":len(all_splits)})
+        self.db_save_upload_stats(stats)
+        return True
 
     def add_to_vector_collection(self, all_splits: list[Document], file_name: str):
+        print("add_to_vector_collection()")
         collection = self.get_vector_collection()
         documents, metadatas, ids = [], [], []
 
@@ -228,13 +262,9 @@ class DbRag:
             #     metadatas=metadatas,
             #     ids=ids,
             # )
-            id=f"{file_name}_{idx}"
-            print(id,split,"...")
-            collection.upsert(
-                documents=[split.text],
-                metadatas=[split.meta],
-                ids=[id]
-            )
+            id = f"{file_name}_{idx}"
+            print(id, split.text, "...")
+            collection.upsert(documents=[split.text], metadatas=[split.meta], ids=[id])
 
     # -- retrieving data from DB -----------------------
 
@@ -248,24 +278,26 @@ class DbRag:
     ) -> tuple[str, list[int]]:
         """Re-ranks documents using a cross-encoder model for more accurate relevance scoring."""
 
-        relevant_text = ""
-        relevant_text_ids = []
-        if (
-            self.config.cross_encoder != "NONE"
-            and len(documents) > self.config.max_answer_chunks
-        ):
+        relevant_text = []
+        relevant_text_score = []
+        if self.config.cross_encoder != "NONE":
             encoder_model = CrossEncoder(self.config.cross_encoder)
-            ranks = encoder_model.rank(
-                prompt, documents, top_k=self.config.max_answer_chunks
-            )
-            for rank in ranks:
-                relevant_text += documents[rank["corpus_id"]]
-                relevant_text_ids.append(rank["corpus_id"])
+            if len(documents) > self.config.max_answer_chunks:
+                ranks = encoder_model.rank(
+                    prompt, documents, top_k=self.config.max_answer_chunks
+                )
+                for rank in ranks:
+                    relevant_text.append(documents[rank["corpus_id"]])
+                    relevant_text_score.append(rank["score"])
+            else:
+                for i in range(0, min(self.config.max_answer_chunks, len(documents))):
+                    relevant_text.append(documents[i])
+                    relevant_text_score.append(rank["score"])
         else:
             for i in range(0, min(self.config.max_answer_chunks, len(documents))):
-                relevant_text += documents[i]
-                relevant_text_ids.append(i)
+                relevant_text.append(documents[i])
+                relevant_text_score.append(0)
 
-        return relevant_text, relevant_text_ids
+        return relevant_text, relevant_text_score
 
     # UI

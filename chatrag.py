@@ -1,31 +1,34 @@
 from dataclasses import dataclass
 import ollama
 
-SYSTEM_PROMPT_EN="""
+SYSTEM_PROMPT_EN = """
       Use the following pieces of context to answer the user's question. If you don't know the answer, just say that you don't know, don't try to make up an answer. Context:
      {context}
      """
 
 
-SYSTEM_PROMPT_CZ="""
+SYSTEM_PROMPT_CZ = """
      K odpovědi na otázku uživatele použijte následující části kontextu. Pokud neznáte odpověď, řekněte jen, že nevíte, nesnažte se odpověď vymýšlet. Kontext:
      {context}
      """
 
+
 @dataclass
 class ChatConfig:
-     model="llama3.2:3b"
-    #    original_system_prompt = 
+    model = "llama3.2:3b"
+    #    original_system_prompt =
     #     """
     # Use the following pieces of context to answer the user's question. If you don't know the answer, just say that you don't know, don't try to make up an answer. Context:
-    # {context}      
+    # {context}
     # """
-    
+
     # chttps://pdx.www.deepl.com/en/translator
-    #     K zodpovězení otázky uživatele použijte následující souvislosti. Pokud odpověď neznáte, prostě řekněte, že nevíte, nesnažte se odpověď vymyslet. Kontext: 
-    # https://translate.google.com/ 
+    #     K zodpovězení otázky uživatele použijte následující souvislosti. Pokud odpověď neznáte, prostě řekněte, že nevíte, nesnažte se odpověď vymyslet. Kontext:
+    # https://translate.google.com/
     # K odpovědi na otázku uživatele použijte následující části kontextu. Pokud neznáte odpověď, řekněte jen, že nevíte, nesnažte se odpověď vymýšlet. Kontext:
-     original_system_prompt = SYSTEM_PROMPT_EN
+    original_system_prompt = SYSTEM_PROMPT_EN
+
+
 # You are an AI assistant tasked with providing detailed answers based solely on the given context. Your goal is to analyze the information provided and formulate a comprehensive, well-structured response to the question.
 
 # context will be passed as "Context:"
@@ -50,21 +53,25 @@ class ChatConfig:
 
 
 class ChatRag:
-    config=ChatConfig()
-    # TODO: put me in config    
+    config = ChatConfig()
+    # TODO: put me in config
 
-    def format_prompts(self,context: list[str], prompt: str,system_prompt:str):
+    def format_prompts(self, context: list[str], prompt: str, system_prompt: str):
+
+        context_text = "\n".join(context)
+        print("context_text:", context_text)
         return [
-                {
-                    "role": "system",
-                    "content": system_prompt.replace("{context}",context),
-                },
-                {
-                    "role": "user",
-                    "content": prompt.replace("{context}",context),
-                },
-            ]
-    def call_llm(self,prompts):
+            {
+                "role": "system",
+                "content": system_prompt.replace("{context}", context_text),
+            },
+            {
+                "role": "user",
+                "content": prompt.replace("{context}", context_text),
+            },
+        ]
+
+    def call_llm(self, prompts):
         """Calls the language model with context and prompt to generate a response.
 
         Uses Ollama to stream responses from a language model by providing context and a
@@ -80,14 +87,9 @@ class ChatRag:
         Raises:
             OllamaError: If there are issues communicating with the Ollama API
         """
-        response = ollama.chat(
-            model=self.config.model,
-            stream=True,
-            messages=prompts
-        )
+        response = ollama.chat(model=self.config.model, stream=True, messages=prompts)
         for chunk in response:
             if chunk["done"] is False:
                 yield chunk["message"]["content"]
             else:
                 break
-                                

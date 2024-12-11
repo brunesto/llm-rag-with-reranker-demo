@@ -29,11 +29,33 @@ st.header("🗣️ RAG Question Answer")
 EMBEDDINGS = [
     "ollama/nomic-embed-text:latest",
     "ollama/mxbai-embed-large",
+    "ollama/snowflake-arctic-embed",
+    "ollama/all-minilm",
+    "ollama/bge-m3",
+    "ollama/bge-large",
+    "ollama/paraphrase-multilingual",
+    "ollama/snowflake-arctic-embed2 ",    
     "seznam/Seznam/retromae-small-cs",
-]
+    "seznam/Seznam/dist-mpnet-paracrawl-cs-en",
+    "seznam/Seznam/dist-mpnet-czeng-cs-en",
+    "seznam/Seznam/simcse-retromae-small-cs",
+    "seznam/Seznam/simcse-dist-mpnet-paracrawl-cs-en",
+    "seznam/Seznam/simcse-dist-mpnet-czeng-cs-en",
+    "seznam/Seznam/simcse-small-e-czech",
+    ]
 EMBEDDING_DISTANCE_FUNCTIONS=["cosine", "l2", "ip"]
 
-LLM_MODEL=["llama3.2:3b", "qwen2"]
+LLM_MODEL=["llama3.2:3b","llama3.2:1b", #facebook, no cz
+           "mistral", # mistral AI
+           "gemma:2b","gemma:7b", # google, may be it supports cz
+           "phi3","phi3:14b" # microsoft
+           "qwq","qwen2","marco-o1", # alibaba
+           "dbrx",
+           "alfred",
+           "aya-expanse", # cz support
+           "nuextract"
+           #"llama3.3",
+            ]
 
 CROSS_ENCODERS= (
             "cross-encoder/ms-marco-MiniLM-L-6-v2",
